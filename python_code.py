@@ -1,25 +1,24 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd
 import plotly.graph_objects as go
+import pandas as pd
 
 st.set_page_config(
-    page_title="Stock Price Dashboard",
+    page_title="Stock Chart",
     layout="wide"
 )
 
-st.title("📈 Stock Price Dashboard (Yahoo Finance)")
+st.title("📈 Yahoo Finance Stock Chart")
 
-# -----------------------------
-# Sidebar
-# -----------------------------
+# ---------------- Sidebar ---------------- #
+
 ticker = st.sidebar.text_input(
-    "Enter Stock Symbol",
-    value="AAPL"
+    "Ticker",
+    "AAPL"
 ).upper()
 
 period = st.sidebar.selectbox(
-    "Select Time Period",
+    "Period",
     [
         "1mo",
         "3mo",
@@ -32,7 +31,7 @@ period = st.sidebar.selectbox(
     ]
 )
 
-interval_map = {
+intervals = {
     "1mo": "1d",
     "3mo": "1d",
     "6mo": "1d",
@@ -43,68 +42,87 @@ interval_map = {
     "max": "1mo"
 }
 
-interval = interval_map[period]
+interval = intervals[period]
 
-# -----------------------------
-# Download Data
-# -----------------------------
-data = yf.download(
-    ticker,
-    period=period,
-    interval=interval,
-    auto_adjust=True,
-    progress=False
-)
+# ---------------- Download ---------------- #
 
-if data.empty:
-    st.error("No data found.")
+try:
+    data = yf.download(
+        tickers=ticker,
+        period=period,
+        interval=interval,
+        auto_adjust=True,
+        progress=False,
+        group_by="column"
+    )
+
+except Exception as e:
+    st.error(f"Download failed.\n\n{e}")
     st.stop()
 
-# -----------------------------
-# Metrics
-# -----------------------------
-latest = float(data["Close"].iloc[-1])
-first = float(data["Close"].iloc[0])
+if data.empty:
+    st.error("No data available.")
+    st.stop()
+
+# ---------------- Fix MultiIndex ---------------- #
+
+if isinstance(data.columns, pd.MultiIndex):
+    data.columns = data.columns.get_level_values(0)
+
+required = ["Open", "High", "Low", "Close", "Volume"]
+
+for col in required:
+    if col not in data.columns:
+        st.error(f"{col} not found.")
+        st.stop()
+
+# ---------------- Metrics ---------------- #
+
+close = data["Close"].dropna()
+
+if close.empty:
+    st.error("No closing prices available.")
+    st.stop()
+
+latest = close.iloc[-1]
+first = close.iloc[0]
 
 change = latest - first
-pct = change / first * 100
+pct = (change / first) * 100
 
-col1, col2, col3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
 
-col1.metric("Latest Price", f"${latest:.2f}")
-col2.metric("Change", f"{change:.2f}")
-col3.metric("% Change", f"{pct:.2f}%")
+c1.metric("Latest Price", f"${latest:.2f}")
+c2.metric("Change", f"{change:.2f}")
+c3.metric("% Change", f"{pct:.2f}%")
 
-# -----------------------------
-# Line Chart
-# -----------------------------
+# ---------------- Chart ---------------- #
+
 fig = go.Figure()
 
 fig.add_trace(
     go.Scatter(
         x=data.index,
-        y=data["Close"],
+        y=close,
         mode="lines",
-        name="Close Price"
+        name="Close"
     )
 )
 
 fig.update_layout(
-    title=f"{ticker} Closing Price",
+    template="plotly_white",
+    height=600,
     xaxis_title="Date",
     yaxis_title="Price",
-    template="plotly_white",
-    height=600
+    hovermode="x unified"
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
-# -----------------------------
-# Data Table
-# -----------------------------
+# ---------------- Table ---------------- #
+
 st.subheader("Historical Data")
 
-st.dataframe(
-    data[["Open", "High", "Low", "Close", "Volume"]],
-    use_container_width=True
-)
+display_df = data[required].copy()
+
+st.dataframe(display_df, use_container_width=True)
